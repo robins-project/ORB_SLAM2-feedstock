@@ -1,0 +1,404 @@
+diff --git a/include/Frame.h b/include/Frame.h
+index a6a8032..1db2af6 100644
+--- a/include/Frame.h
++++ b/include/Frame.h
+@@ -117,6 +117,7 @@ public:
+     static float invfx;
+     static float invfy;
+     cv::Mat mDistCoef;
++    int camaraModo;
+ 
+     // Stereo baseline multiplied by fx.
+     float mbf;
+@@ -198,6 +199,8 @@ private:
+     // Computes image bounds for the undistorted image (called in the constructor).
+     void ComputeImageBounds(const cv::Mat &imLeft);
+ 
++    void antidistorsionarProyeccionEquidistante(cv::Mat &puntos);
++
+     // Assign keypoints to the grid for speed up feature matching (called in the constructor).
+     void AssignFeaturesToGrid();
+ 
+diff --git a/include/Tracking.h b/include/Tracking.h
+index 5aaa93e..f05ebbd 100644
+--- a/include/Tracking.h
++++ b/include/Tracking.h
+@@ -51,7 +51,7 @@ class LoopClosing;
+ class System;
+ 
+ class Tracking
+-{  
++{
+ 
+ public:
+     Tracking(System* pSys, ORBVocabulary* pVoc, FrameDrawer* pFrameDrawer, MapDrawer* pMapDrawer, Map* pMap,
+@@ -153,6 +153,7 @@ protected:
+     //Other Thread Pointers
+     LocalMapping* mpLocalMapper;
+     LoopClosing* mpLoopClosing;
++    int camaraModo;
+ 
+     //ORB
+     ORBextractor* mpORBextractorLeft, *mpORBextractorRight;
+@@ -169,10 +170,10 @@ protected:
+     KeyFrame* mpReferenceKF;
+     std::vector<KeyFrame*> mvpLocalKeyFrames;
+     std::vector<MapPoint*> mvpLocalMapPoints;
+-    
++
+     // System
+     System* mpSystem;
+-    
++
+     //Drawers
+     Viewer* mpViewer;
+     FrameDrawer* mpFrameDrawer;
+diff --git a/src/Frame.cc b/src/Frame.cc
+index 0e37d49..4df36d9 100644
+--- a/src/Frame.cc
++++ b/src/Frame.cc
+@@ -85,11 +85,13 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
+     if(mvKeys.empty())
+         return;
+ 
++    camaraModo = mDistCoef.rows? 0 : 1;
++
+     UndistortKeyPoints();
+ 
+     ComputeStereoMatches();
+ 
+-    mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));    
++    mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
+     mvbOutlier = vector<bool>(N,false);
+ 
+ 
+@@ -125,7 +127,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
+ 
+     // Scale Level Info
+     mnScaleLevels = mpORBextractorLeft->GetLevels();
+-    mfScaleFactor = mpORBextractorLeft->GetScaleFactor();    
++    mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
+     mfLogScaleFactor = log(mfScaleFactor);
+     mvScaleFactors = mpORBextractorLeft->GetScaleFactors();
+     mvInvScaleFactors = mpORBextractorLeft->GetInverseScaleFactors();
+@@ -140,6 +142,8 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
+     if(mvKeys.empty())
+         return;
+ 
++    camaraModo = mDistCoef.rows? 0 : 1;
++
+     UndistortKeyPoints();
+ 
+     ComputeStereoFromRGBD(imDepth);
+@@ -195,6 +199,8 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
+     if(mvKeys.empty())
+         return;
+ 
++    camaraModo = mDistCoef.rows? 0 : 1;
++
+     UndistortKeyPoints();
+ 
+     // Set no stereo information
+@@ -246,10 +252,10 @@ void Frame::AssignFeaturesToGrid()
+ 
+ void Frame::ExtractORB(int flag, const cv::Mat &im)
+ {
+-    if(flag==0)
++    //if(flag==0)
+         (*mpORBextractorLeft)(im,cv::Mat(),mvKeys,mDescriptors);
+-    else
+-        (*mpORBextractorRight)(im,cv::Mat(),mvKeysRight,mDescriptorsRight);
++    //else
++    //    (*mpORBextractorRight)(im,cv::Mat(),mvKeysRight,mDescriptorsRight);
+ }
+ 
+ void Frame::SetPose(cv::Mat Tcw)
+@@ -259,7 +265,7 @@ void Frame::SetPose(cv::Mat Tcw)
+ }
+ 
+ void Frame::UpdatePoseMatrices()
+-{ 
++{
+     mRcw = mTcw.rowRange(0,3).colRange(0,3);
+     mRwc = mRcw.t();
+     mtcw = mTcw.rowRange(0,3).col(3);
+@@ -271,7 +277,7 @@ bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
+     pMP->mbTrackInView = false;
+ 
+     // 3D in absolute coordinates
+-    cv::Mat P = pMP->GetWorldPos(); 
++    cv::Mat P = pMP->GetWorldPos();
+ 
+     // 3D in camera coordinates
+     const cv::Mat Pc = mRcw*P+mtcw;
+@@ -403,7 +409,7 @@ void Frame::ComputeBoW()
+ 
+ void Frame::UndistortKeyPoints()
+ {
+-    if(mDistCoef.at<float>(0)==0.0)
++    if(camaraModo == 0 && mDistCoef.at<float>(0)==0.0)
+     {
+         mvKeysUn=mvKeys;
+         return;
+@@ -419,7 +425,10 @@ void Frame::UndistortKeyPoints()
+ 
+     // Undistort points
+     mat=mat.reshape(2);
+-    cv::undistortPoints(mat,mat,mK,mDistCoef,cv::Mat(),mK);
++    if(camaraModo)
++        antidistorsionarProyeccionEquidistante(mat);
++    else
++        cv::undistortPoints(mat,mat,mK,mDistCoef,cv::Mat(),mK);
+     mat=mat.reshape(1);
+ 
+     // Fill undistorted keypoint vector
+@@ -435,7 +444,7 @@ void Frame::UndistortKeyPoints()
+ 
+ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
+ {
+-    if(mDistCoef.at<float>(0)!=0.0)
++    if(camaraModo!=0 || mDistCoef.at<float>(0)!=0.0)
+     {
+         cv::Mat mat(4,2,CV_32F);
+         mat.at<float>(0,0)=0.0; mat.at<float>(0,1)=0.0;
+@@ -445,7 +454,10 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
+ 
+         // Undistort corners
+         mat=mat.reshape(2);
+-        cv::undistortPoints(mat,mat,mK,mDistCoef,cv::Mat(),mK);
++        if(camaraModo)
++            antidistorsionarProyeccionEquidistante(mat);
++        else
++            cv::undistortPoints(mat,mat,mK,mDistCoef,cv::Mat(),mK);
+         mat=mat.reshape(1);
+ 
+         mnMinX = min(mat.at<float>(0,0),mat.at<float>(2,0));
+@@ -679,4 +691,35 @@ cv::Mat Frame::UnprojectStereo(const int &i)
+         return cv::Mat();
+ }
+ 
++void Frame::antidistorsionarProyeccionEquidistante(cv::Mat &puntos){
++	// foco y centro
++	cv::Vec2d f, c;
++	f = cv::Vec2f(mK.at<float>(0, 0), mK.at<float>(1, 1));
++	c = cv::Vec2f(mK.at<float>(0, 2), mK.at<float>(1, 2));
++	cv::Matx33f K((float*)mK.ptr());
++
++    cv::Matx33d PP;
++
++    // start undistorting
++    cv::Vec2f* puntosVec = puntos.ptr<cv::Vec2f>();
++
++    size_t n = puntos.rows;
++
++    for(size_t i = 0; i < n; i++ ){
++        cv::Vec2d pi = (cv::Vec2d)puntosVec[i];  // image point
++        cv::Vec2d pw((pi[0] - c[0])/f[0], (pi[1] - c[1])/f[1]);      // world point
++
++        double theta_d = sqrt(pw[0]*pw[0] + pw[1]*pw[1]);
++        double scale = theta_d>1e-8 ? std::tan(theta_d) / theta_d : 1.0;	// scale será siempre >= 1.0
++        cv::Vec2d pu = pw * scale; //undistorted point: en escala focal
++
++        // reproject
++        cv::Vec3d pr = K * cv::Vec3d(pu[0], pu[1], 1.0); // devuelto a la escala original según K
++        cv::Vec2d fi(pr[0]/pr[2], pr[1]/pr[2]);       // final: de homogéneas a euclideanas
++
++        puntosVec[i] = fi;
++    }
++
++}
++
+ } //namespace ORB_SLAM
+diff --git a/src/Optimizer.cc b/src/Optimizer.cc
+index 83d9264..1cb5b4e 100644
+--- a/src/Optimizer.cc
++++ b/src/Optimizer.cc
+@@ -368,7 +368,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
+     // At the next optimization, outliers are not included, but at the end they can be classified as inliers again.
+     const float chi2Mono[4]={5.991,5.991,5.991,5.991};
+     const float chi2Stereo[4]={7.815,7.815,7.815, 7.815};
+-    const int its[4]={10,10,10,10};    
++    const int its[4]={10,10,10,10};
+ 
+     int nBad=0;
+     for(size_t it=0; it<4; it++)
+@@ -393,7 +393,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
+             const float chi2 = e->chi2();
+ 
+             if(chi2>chi2Mono[it])
+-            {                
++            {
+                 pFrame->mvbOutlier[idx]=true;
+                 e->setLevel(1);
+                 nBad++;
+@@ -428,7 +428,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
+                 nBad++;
+             }
+             else
+-            {                
++            {
+                 e->setLevel(0);
+                 pFrame->mvbOutlier[idx]=false;
+             }
+@@ -439,7 +439,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
+ 
+         if(optimizer.edges().size()<10)
+             break;
+-    }    
++    }
+ 
+     // Recover optimized pose and return number of inliers
+     g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
+@@ -451,7 +451,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
+ }
+ 
+ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap)
+-{    
++{
+     // Local KeyFrames: First Breath Search from Current Keyframe
+     list<KeyFrame*> lLocalKeyFrames;
+ 
+@@ -495,7 +495,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
+             KeyFrame* pKFi = mit->first;
+ 
+             if(pKFi->mnBALocalForKF!=pKF->mnId && pKFi->mnBAFixedForKF!=pKF->mnId)
+-            {                
++            {
+                 pKFi->mnBAFixedForKF=pKF->mnId;
+                 if(!pKFi->isBad())
+                     lFixedCameras.push_back(pKFi);
+@@ -587,7 +587,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
+             KeyFrame* pKFi = mit->first;
+ 
+             if(!pKFi->isBad())
+-            {                
++            {
+                 const cv::KeyPoint &kpUn = pKFi->mvKeysUn[mit->second];
+ 
+                 // Monocular observation
+@@ -711,7 +711,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
+     vector<pair<KeyFrame*,MapPoint*> > vToErase;
+     vToErase.reserve(vpEdgesMono.size()+vpEdgesStereo.size());
+ 
+-    // Check inlier observations       
++    // Check inlier observations
+     for(size_t i=0, iend=vpEdgesMono.size(); i<iend;i++)
+     {
+         g2o::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
+@@ -993,6 +993,9 @@ void Optimizer::OptimizeEssentialGraph(Map* pMap, KeyFrame* pLoopKF, KeyFrame* p
+     {
+         KeyFrame* pKFi = vpKFs[i];
+ 
++        if(pKFi == NULL || pKFi->isBad())
++            continue;
++
+         const int nIDi = pKFi->mnId;
+ 
+         g2o::VertexSim3Expmap* VSim3 = static_cast<g2o::VertexSim3Expmap*>(optimizer.vertex(nIDi));
+@@ -1066,7 +1069,7 @@ int Optimizer::OptimizeSim3(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPoint *> &
+     const cv::Mat t2w = pKF2->GetTranslation();
+ 
+     // Set Sim3 vertex
+-    g2o::VertexSim3Expmap * vSim3 = new g2o::VertexSim3Expmap();    
++    g2o::VertexSim3Expmap * vSim3 = new g2o::VertexSim3Expmap();
+     vSim3->_fix_scale=bFixScale;
+     vSim3->setEstimate(g2oS12);
+     vSim3->setId(0);
+diff --git a/src/Tracking.cc b/src/Tracking.cc
+index 2273b2c..8130963 100644
+--- a/src/Tracking.cc
++++ b/src/Tracking.cc
+@@ -50,7 +50,7 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
+ {
+     // Load camera parameters from settings file
+ 
+-    cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
++    cv::FileStorage fSettings(strSettingPath.c_str(), cv::FileStorage::READ);
+     float fx = fSettings["Camera.fx"];
+     float fy = fSettings["Camera.fy"];
+     float cx = fSettings["Camera.cx"];
+@@ -63,18 +63,37 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
+     K.at<float>(1,2) = cy;
+     K.copyTo(mK);
+ 
+-    cv::Mat DistCoef(4,1,CV_32F);
+-    DistCoef.at<float>(0) = fSettings["Camera.k1"];
+-    DistCoef.at<float>(1) = fSettings["Camera.k2"];
+-    DistCoef.at<float>(2) = fSettings["Camera.p1"];
+-    DistCoef.at<float>(3) = fSettings["Camera.p2"];
+-    const float k3 = fSettings["Camera.k3"];
+-    if(k3!=0)
+-    {
+-        DistCoef.resize(5);
+-        DistCoef.at<float>(4) = k3;
++    // Modo de camara y coeficientes de distorsion
++    //cv::FileNode fn = fSettings["Camera.modo"];
++    camaraModo = fSettings["Camera.modo"];
++    //if(fn.isNone() || (int)fn == 0){
++    if(camaraModo == 0){
++    	// Modo normal
++        cv::Mat DistCoef(8,1,CV_32F);
++        DistCoef.at<float>(0) = fSettings["Camera.k1"];
++        DistCoef.at<float>(1) = fSettings["Camera.k2"];
++        DistCoef.at<float>(2) = fSettings["Camera.p1"];
++        DistCoef.at<float>(3) = fSettings["Camera.p2"];
++        const float k3 = DistCoef.at<float>(4) = fSettings["Camera.k3"];
++        const float k4 = DistCoef.at<float>(5) = fSettings["Camera.k4"];
++        const float k5 = DistCoef.at<float>(6) = fSettings["Camera.k5"];
++        const float k6 = DistCoef.at<float>(7) = fSettings["Camera.k6"];
++        // UndistortPoints acorta su formula polinomica si el vector de coeficientes es mas corto.  Las longitudes son 4, 5 u 8.
++        if(k5==0 && k6==0 && k4==0){
++    		if(k3==0){
++    			DistCoef.resize(4);
++    			cout << "2 coeficientes de distorsion radial." << endl;
++    		}else{
++    			DistCoef.resize(5);
++    			cout << "3 coeficientes de distorsion radial." << endl;
++    		}
++        } else
++    		cout << "6 coeficientes de distorsion radial." << endl;
++        DistCoef.copyTo(mDistCoef);
++    }else if(camaraModo == 1){
++		// fiseye, proyeccion equidistante (sin parametros de distorsion)
++		mDistCoef = cv::Mat();//::zeros(4,1,CV_32F);
+     }
+-    DistCoef.copyTo(mDistCoef);
+ 
+     mbf = fSettings["Camera.bf"];
+ 
+@@ -91,12 +110,20 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
+     cout << "- fy: " << fy << endl;
+     cout << "- cx: " << cx << endl;
+     cout << "- cy: " << cy << endl;
+-    cout << "- k1: " << DistCoef.at<float>(0) << endl;
+-    cout << "- k2: " << DistCoef.at<float>(1) << endl;
+-    if(DistCoef.rows==5)
+-        cout << "- k3: " << DistCoef.at<float>(4) << endl;
+-    cout << "- p1: " << DistCoef.at<float>(2) << endl;
+-    cout << "- p2: " << DistCoef.at<float>(3) << endl;
++    if(camaraModo == 0){
++		cout << "- k1: " << mDistCoef.at<float>(0) << endl;
++		cout << "- k2: " << mDistCoef.at<float>(1) << endl;
++		if(mDistCoef.rows>4){
++			cout << "- k3: " << mDistCoef.at<float>(4) << endl;
++			if(mDistCoef.rows>5){
++				cout << "- k4: " << mDistCoef.at<float>(5) << endl;
++				cout << "- k5: " << mDistCoef.at<float>(6) << endl;
++				cout << "- k6: " << mDistCoef.at<float>(7) << endl;
++			}
++		}
++		cout << "- p1: " << mDistCoef.at<float>(2) << endl;
++		cout << "- p2: " << mDistCoef.at<float>(3) << endl;
++    }
+     cout << "- fps: " << fps << endl;
+ 
+ 
+@@ -916,7 +943,7 @@ bool Tracking::TrackWithMotionModel()
+             else if(mCurrentFrame.mvpMapPoints[i]->Observations()>0)
+                 nmatchesMap++;
+         }
+-    }    
++    }
+ 
+     if(mbOnlyTracking)
+     {

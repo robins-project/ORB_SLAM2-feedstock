@@ -1,0 +1,49 @@
+diff --git a/include/System.h b/include/System.h
+index b377b45..3cbf248 100644
+--- a/include/System.h
++++ b/include/System.h
+@@ -94,6 +94,10 @@ public:
+     // This function must be called before saving the trajectory.
+     void Shutdown();
+ 
++    // Get map with tracked frames and points.
++    // Call first Shutdown()
++    Map *GetMap();
++
+     // Save camera trajectory in the TUM RGB-D dataset format.
+     // Only for stereo and RGB-D. This method does not work for monocular.
+     // Call first Shutdown()
+diff --git a/src/System.cc b/src/System.cc
+index 8df4157..fdf1bd4 100644
+--- a/src/System.cc
++++ b/src/System.cc
+@@ -119,7 +119,7 @@ cv::Mat System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const
+     {
+         cerr << "ERROR: you called TrackStereo but input sensor was not set to STEREO." << endl;
+         exit(-1);
+-    }   
++    }
+ 
+     // Check mode change
+     {
+@@ -170,7 +170,7 @@ cv::Mat System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const doub
+     {
+         cerr << "ERROR: you called TrackRGBD but input sensor was not set to RGBD." << endl;
+         exit(-1);
+-    }    
++    }
+ 
+     // Check mode change
+     {
+@@ -319,6 +319,11 @@ void System::Shutdown()
+         pangolin::BindToContext("ORB-SLAM2: Map Viewer");
+ }
+ 
++Map *System::GetMap()
++{
++    return mpMap;
++}
++
+ void System::SaveTrajectoryTUM(const string &filename)
+ {
+     cout << endl << "Saving camera trajectory to " << filename << " ..." << endl;

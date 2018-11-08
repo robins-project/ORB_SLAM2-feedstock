@@ -1,0 +1,38 @@
+{% set name = "orb_slam2" %}
+{% set version = "master" %}
+{% set sha256 = "f6ab15ad8ba9201fefb8273337726b94e17a6f488b319d66c51b724400dbb079" %}
+
+package:
+  name: {{ name }}
+  version: {{ version }}
+
+source:
+  fn: {{ name }}-{{ version }}.tar.gz
+  url: https://github.com/raulmur/ORB_SLAM2/archive/{{ version }}.tar.gz
+  sha256: {{ sha256 }}
+  patches:
+    - GetMap.patch
+    - fisheye.patch
+
+build:
+  number: 1
+
+requirements:
+  build:
+    # - {{ compiler('c') }}
+    # - {{ compiler('cxx') }}
+    - cmake
+    - ninja
+  host:
+    - eigen {{ eigen }}
+    - opencv {{ opencv }}
+    - pangolin {{ pangolin }}
+
+about:
+  home: https://github.com/raulmur/ORB_SLAM2
+  summary: Real-Time SLAM for Monocular, Stereo and RGB-D Cameras, with Loop Detection and Relocalization Capabilities
+  license: GPL v3
+
+extra:
+  recipe-maintainers:
+  - v-turin
