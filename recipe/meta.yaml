@@ -27,6 +27,7 @@ requirements:
     - eigen {{ eigen }}
     - opencv {{ opencv }}
     - pangolin {{ pangolin }}
+    - glew
 
 about:
   home: https://github.com/raulmur/ORB_SLAM2
